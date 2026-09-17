@@ -132,6 +132,24 @@ object AngleRuntime {
         }
     }
 
+    /**
+     * Fold5: closing from the launcher puts the device to sleep (device_folded),
+     * so the cover never shows the frame that is currently left on it.
+     */
+    fun isLauncherResumed(onResult: (Boolean) -> Unit) {
+        scope.launch {
+            val top = client.shell(
+                "dumpsys activity activities 2>/dev/null | grep -m1 ResumedActivity",
+            ).getOrNull().orEmpty()
+            val launcher = client.shell(
+                "cmd package resolve-activity --brief -a android.intent.action.MAIN " +
+                    "-c android.intent.category.HOME | tail -n 1 | cut -d/ -f1",
+            ).getOrNull().orEmpty().trim()
+            val home = launcher.isNotEmpty() && top.contains(" $launcher/")
+            withContext(Dispatchers.Main.immediate) { onResult(home) }
+        }
+    }
+
     fun releasePreparedCoverDisplay() {
         scope.launch {
             displayCommand.withLock {

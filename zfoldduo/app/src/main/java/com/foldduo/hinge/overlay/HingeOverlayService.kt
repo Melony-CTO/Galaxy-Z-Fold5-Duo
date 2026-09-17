@@ -436,7 +436,16 @@ class HingeOverlayService : AccessibilityService() {
             angle in COVER_PREPARE_DONE_HINGE..COVER_PREPARE_HINGE &&
             displayManager.getDisplay(activeDisplayId)?.state == Display.STATE_ON
         ) {
-            prepareDualDisplayAfterInnerSnapshot()
+            dualPreparePending = true
+            AngleRuntime.isLauncherResumed { home ->
+                if (!dualPreparePending || motionTracker.motion != HingeTravel.CLOSING) return@isLauncherResumed
+                if (home) {
+                    // Keep dualPreparePending set so this close stays inner-only.
+                    Log.i(TAG, "launcher on top; skipping cover preparation for this close")
+                } else {
+                    prepareDualDisplayAfterInnerSnapshot()
+                }
+            }
         }
         if (dualDisplayActive) {
             scheduleCoverLayer()
