@@ -15,6 +15,10 @@ class EmbeddedAdbAngleClient(
     @Volatile
     private var session: Session? = null
 
+    private var lastPrivate = Float.NaN
+    private var lastPrivateChangeNanos = 0L
+    private var lastHalNanos = 0L
+
     val isConnected: Boolean
         get() = session != null
 
@@ -93,9 +97,26 @@ class EmbeddedAdbAngleClient(
                     shell(PRIVATE_SENSOR_WAKE_COMMAND)
                     continue
                 }
+                val now = SystemClock.elapsedRealtimeNanos()
+                val hal = HAL_ANGLE.find(line)?.groupValues?.get(1)?.toFloatOrNull()
+                if (hal != null) {
+                    // Fold5: the wallpaper stops updating while hidden; fall back to the HAL log (~11° steps).
+                    lastHalNanos = now
+                    if (now - lastPrivateChangeNanos > PRIVATE_STALE_NANOS) {
+                        onAngle(hal.coerceIn(0f, 180f), now)
+                    }
+                    continue
+                }
                 val value = PRIVATE_ANGLE.find(line)?.groupValues?.get(1)?.toFloatOrNull() ?: continue
+                if (value != lastPrivate) {
+                    lastPrivate = value
+                    lastPrivateChangeNanos = now
+                } else if (lastPrivateChangeNanos < lastHalNanos) {
+                    // Do not let a frozen wallpaper value override fresher HAL samples.
+                    continue
+                }
                 val hinge = value.coerceIn(0f, 180f)
-                onAngle(hinge, SystemClock.elapsedRealtimeNanos())
+                onAngle(hinge, now)
                 onStatus("Samsung内部ヒンジ計測中")
             }
         } catch (error: Throwable) {
@@ -141,12 +162,15 @@ class EmbeddedAdbAngleClient(
         private const val PRIVATE_SENSOR_STOPPED = "unregisterSensor: mIsSensorRegistered[true]"
         private const val ANGLE_LOG_COMMAND =
             "logcat -v brief -T 1 --regex='(onCommand: action\\[$ANGLE_ACTION\\], mCurrentAngle|" +
-                "unregisterSensor: mIsSensorRegistered\\[true\\])' " +
-                "'SprWallpaper|FoldInteractive':I '*:S'"
+                "unregisterSensor: mIsSensorRegistered\\[true\\]|folding_angle ts=)' " +
+                "'SprWallpaper|FoldInteractive':I 'sensors-hal':I '*:S'"
         private const val LIVE_CAPTURE_COMMAND =
             "CLASSPATH=${'$'}(pm path com.foldduo.hinge | head -n 1 | cut -d: -f2) " +
                 "exec app_process /system/bin com.foldduo.hinge.capture.LiveCaptureBridge"
         private val PRIVATE_ANGLE = Regex("mCurrentAngle\\[([-+]?\\d+(?:\\.\\d+)?)\\]")
+        // e.g. "folding_angle ts=1447579248698251 ns value 168/0"
+        private val HAL_ANGLE = Regex("folding_angle ts=\\d+ ns value\\s+(\\d+)/")
+        private const val PRIVATE_STALE_NANOS = 250_000_000L
 
         private fun safeMessage(error: Throwable): String =
             error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
