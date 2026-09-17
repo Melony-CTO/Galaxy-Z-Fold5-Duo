@@ -1,0 +1,14 @@
+# 참고용 외부 레포 클론 (각자 원 레포에서 관리)
+_ref/
+# 실기기 진단 로그 (기기 시리얼·IP 포함 가능)
+logs/
+.DS_Store
+# 보안파일 — 98_Secrets_Key 에만 둔다
+secrets.json
+*.env
+local.properties
+*.keystore
+*.jks
+build/
+.gradle/
+.idea/
