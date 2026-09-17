@@ -185,6 +185,15 @@ object AngleRuntime {
     fun finishClosedDisplayHandoff(onComplete: () -> Unit) {
         scope.launch {
             displayCommand.withLock {
+                // Fold5 drops the state-4 override and commits CLOSED on its own when
+                // physically closed; promoting through state 5 again power-cycles both panels.
+                val current = client.shell("dumpsys device_state").getOrNull().orEmpty()
+                if (current.contains("Override Request active: false") &&
+                    current.contains("mCommittedState=Optional[DeviceState{identifier=0, name='CLOSED'")
+                ) {
+                    withContext(Dispatchers.Main.immediate) { onComplete() }
+                    return@launch
+                }
                 client.shell("cmd device_state state 5")
                 for (attempt in 0 until COVER_PROMOTION_POLL_COUNT) {
                     val state = client.shell("dumpsys device_state").getOrNull().orEmpty()
