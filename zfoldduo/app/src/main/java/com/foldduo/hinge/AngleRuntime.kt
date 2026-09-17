@@ -73,6 +73,7 @@ object AngleRuntime {
             }
         }
         mdns.start()
+        watchLauncher()
         scope.launch {
             while (isActive) {
                 val endpoint = _connectEndpoint.value
@@ -135,18 +136,33 @@ object AngleRuntime {
     /**
      * Fold5: closing from the launcher puts the device to sleep (device_folded),
      * so the cover never shows the frame that is currently left on it.
+     * Polled ahead of time because the query takes ~150 ms, which delayed the
+     * cover preparation from 150° to ~120° when run at the start of a close.
      */
-    fun isLauncherResumed(onResult: (Boolean) -> Unit) {
+    @Volatile
+    var launcherResumed = false
+        private set
+
+    private fun watchLauncher() {
         scope.launch {
-            val top = client.shell(
-                "dumpsys activity activities 2>/dev/null | grep -m1 ResumedActivity",
-            ).getOrNull().orEmpty()
-            val launcher = client.shell(
-                "cmd package resolve-activity --brief -a android.intent.action.MAIN " +
-                    "-c android.intent.category.HOME | tail -n 1 | cut -d/ -f1",
-            ).getOrNull().orEmpty().trim()
-            val home = launcher.isNotEmpty() && top.contains(" $launcher/")
-            withContext(Dispatchers.Main.immediate) { onResult(home) }
+            var launcher = ""
+            while (isActive) {
+                if (client.isConnected) {
+                    if (launcher.isEmpty()) {
+                        launcher = client.shell(
+                            "cmd package resolve-activity --brief -a android.intent.action.MAIN " +
+                                "-c android.intent.category.HOME | tail -n 1 | cut -d/ -f1",
+                        ).getOrNull().orEmpty().trim()
+                    }
+                    val top = client.shell(
+                        "dumpsys activity activities 2>/dev/null | grep -m1 ResumedActivity",
+                    ).getOrNull()
+                    if (top != null && launcher.isNotEmpty()) {
+                        launcherResumed = top.contains(" $launcher/")
+                    }
+                }
+                delay(LAUNCHER_POLL_MS)
+            }
         }
     }
 
@@ -237,6 +253,7 @@ object AngleRuntime {
     }
 
     private const val MAX_WAKE_LOCK_RELEASES = 32
+    private const val LAUNCHER_POLL_MS = 1_000L
     private const val COVER_PROMOTION_POLL_COUNT = 20
     private const val COVER_PROMOTION_POLL_MS = 16L
 }
